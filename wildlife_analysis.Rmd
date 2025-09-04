@@ -1,0 +1,209 @@
+---
+title: "Airport Wildlife Analysis"
+author: "Paul Emeka"
+date: "2025-09-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages and Data
+```{r}
+library(tidyverse)
+library(readr)
+library(lubridate)
+
+airport_data <- read_csv("airport_project_data2.csv")
+
+str(airport_data)
+head(airport_data)
+
+#Explore unique values
+unique(airport_data$`Wildlife Collision Status`)
+unique(airport_data$`Phase of Flight`)
+unique(airport_data$`Bird/Wildlife Species`)
+unique(airport_data$`Effect on Flight`)
+unique(airport_data$`Wildlife (GI)`)
+unique(airport_data$`Wildlife specie daily log`)
+```
+
+## Wildlife Species Collisions Summary
+```{r}
+bird_summary_long <- airport_data %>%
+  filter(!is.na(`Bird/Wildlife Species`)) %>%
+  mutate(Date = as.Date(Date),              # convert to Date format
+         Year = lubridate::year(Date)) %>%  # extract Year
+  group_by(Year, `Bird/Wildlife Species`) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(Year)
+
+
+bird_summary_wide <- bird_summary_long %>%
+  pivot_wider(
+    names_from = `Bird/Wildlife Species`,
+    values_from = Count,
+    values_fill = list(Count = 0)
+  ) %>%
+  arrange(Year)
+
+head(bird_summary_wide)
+```
+
+## Collision Effects on Flight Summary
+```{r}
+effect_summary_long <- airport_data %>%
+  filter(!is.na(`Effect on Flight`)) %>%
+  mutate(Date = as.Date(Date),              # convert to Date format
+         Year = lubridate::year(Date)) %>%  # extract Year
+  group_by(Year, `Effect on Flight`) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(Year)
+
+effect_summary_wide <- effect_summary_long %>%
+  pivot_wider(
+    names_from = `Effect on Flight`,
+    values_from = Count,
+    values_fill = list(Count = 0)
+  ) %>%
+  arrange(Year)
+
+head(effect_summary_wide)
+```
+
+## Phase of Flight Summary
+```{r}
+phase_summary_long <- airport_data %>%
+  filter(!is.na(`Phase of Flight`)) %>%
+  mutate(Date = as.Date(Date),              # convert to Date format
+         Year = lubridate::year(Date)) %>%  # extract Year
+  group_by(Year, `Phase of Flight`) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(Year)
+
+phase_summary_wide <- phase_summary_long %>%
+  pivot_wider(
+    names_from = `Phase of Flight`,
+    values_from = Count,
+    values_fill = list(Count = 0)
+  ) %>%
+  arrange(Year)
+
+head(phase_summary_wide)
+```
+
+##Wildlife Collision Status Summary
+```{r}
+collision_summary_long <- airport_data %>%
+  filter(!is.na(`Wildlife Collision Status`)) %>%
+  mutate(Date = as.Date(Date),              # convert to Date format
+         Year = lubridate::year(Date)) %>%  # extract Year
+  group_by(Year, `Wildlife Collision Status`) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(Year)
+
+collision_summary_wide <- collision_summary_long %>%
+  pivot_wider(
+    names_from = `Wildlife Collision Status`,
+    values_from = Count,
+    values_fill = list(Count = 0)
+  ) %>%
+  arrange(Year)
+
+head(collision_summary_wide)
+```
+
+## Merge Summaries and Save
+```{r}
+combined_summary <- bird_summary_wide %>%
+  full_join(effect_summary_wide, by = "Year") %>%
+  full_join(phase_summary_wide, by = "Year") %>%
+  full_join(collision_summary_wide, by = "Year") %>%
+  arrange(Year)
+
+write.csv(combined_summary, "combined_summary.csv", row.names = FALSE)
+```
+
+## Add Identifiers and Save Long Format
+```{r}
+bird_long <- bird_summary_long %>% mutate(Category = "Bird/Wildlife Species")
+effect_long <- effect_summary_long %>% mutate(Category = "Effect on Flight")
+phase_long <- phase_summary_long %>% mutate(Category = "Phase of Flight")
+collision_long <- collision_summary_long %>% mutate(Category = "Wildlife Collision Status")
+
+combined_long <- bind_rows(bird_long, effect_long, phase_long, collision_long)
+
+write.csv(combined_long, "combined_long_summary.csv", row.names = FALSE)
+```
+
+## Extracting Year Quarters and Summary of Activities
+```{r}
+quarterly_report <- airport_data %>%
+  mutate(
+    Date = dmy(Date),
+    Quarter = case_when(
+      month(Date) %in% 1:3 ~ "Jan–Mar",
+      month(Date) %in% 4:6 ~ "Apr–Jun",
+      month(Date) %in% 7:9 ~ "Jul–Sep",
+      month(Date) %in% 10:12 ~ "Oct–Dec"
+    )
+  ) %>%
+  filter(!is.na(`Wildlife specie daily log`))
+
+summary_report <- quarterly_report %>%
+  group_by(Quarter, `Wildlife specie daily log`) %>%
+  summarise(Total = sum(`Daily log wildlife no`, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from = `Wildlife specie daily log`,
+    values_from = Total,
+    values_fill = 0
+  )
+
+write.csv(summary_report, "summary_report.csv", row.names = FALSE)
+```
+
+## Extracting Day Periods and Summarizing Activities
+```{r}
+day_period <- airport_data %>%
+  filter(!is.na(`Wildlife specie daily log`)) %>%
+  mutate(
+    secs = as.numeric(Time),
+    hr   = secs %/% 3600,
+    mn   = (secs %% 3600) %/% 60,
+    Day_period = case_when(
+      hr >= 6  & hr < 11 ~ "Morning",
+      hr >= 11 & hr < 16 ~ "Afternoon",
+      (hr >= 16 & hr < 19) | (hr == 19 & mn == 0) ~ "Evening",
+      (hr < 6) | (hr > 19) | (hr == 19 & mn >= 1) ~ "Night",
+      TRUE ~ NA_character_
+    ),
+    Day_period = factor(Day_period,
+                        levels = c("Morning", "Afternoon", "Evening", "Night"),
+                        ordered = TRUE)
+  ) %>%
+  filter(!is.na(Day_period)) %>%
+  group_by(Day_period, `Wildlife specie daily log`) %>%
+  summarise(Total = sum(`Daily log wildlife no`, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from  = `Wildlife specie daily log`,
+    values_from = Total,
+    values_fill = 0
+  ) %>%
+  arrange(Day_period)
+
+write.csv(day_period, "Day_Periods_Wildlife_Activity.csv", row.names = FALSE)
+```
+
+## Extracting Months and Collisions Summary
+```{r}
+species_month_summary <- airport_data %>%
+  filter(!is.na(`Bird/Wildlife Species`)) %>%
+  mutate(
+    Date = as.Date(Date),
+    Month = month(Date, label = TRUE, abbr = TRUE)
+  ) %>%
+  group_by(Month, `Bird/Wildlife Species`) %>%
+  summarise(Count = n(), .groups = "drop")
+
+write.csv(species_month_summary, "species_month_summary.csv", row.names = FALSE)
